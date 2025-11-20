@@ -342,9 +342,6 @@ class Bot
             case preg_match('~^/resetXrStats$~', $this->input['callback'], $m):
                 $this->resetXrStats();
                 break;
-            case preg_match('~^/v2ray$~', $this->input['callback'], $m):
-                $this->v2ray();
-                break;
             case preg_match('~^/checkdns$~', $this->input['callback'], $m):
                 $this->checkdns();
                 break;
@@ -545,46 +542,6 @@ class Bot
         $this->secretSet(exec('head -c 16 /dev/urandom | xxd -ps'));
     }
 
-    public function setSecret()
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter key or 0 for stop mtproto",
-            $this->input['message_id'],
-            reply: 'enter key or 0 for stop mtproto',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'secretSet',
-            'args'           => [],
-        ];
-    }
-
-    public function secretSet($secret)
-    {
-        file_put_contents('/config/mtprotosecret', $secret);
-        $this->restartTG();
-        $this->mtproto();
-    }
-
-    public function setTelegramDomain($domain)
-    {
-        file_put_contents('/config/mtprotodomain', $domain);
-        $this->restartTG();
-        $this->mtproto();
-    }
-
-    public function restartTG()
-    {
-        $secret     = file_get_contents('/config/mtprotosecret');
-        $fakedomain = file_get_contents('/config/mtprotodomain') ?: 'vk.com';
-        $this->ssh('pkill mtproto-proxy', 'tg');
-        if (preg_match('~^\w{32}$~', $secret)) {
-            $p = getenv('TGPORT');
-            $this->ssh("mtproto-proxy --domain $fakedomain -u nobody -H $p --nat-info 10.10.0.8:{$this->ip} -S $secret --aes-pwd /proxy-secret /proxy-multi.conf -M 1 >/dev/null 2>&1 &", 'tg');
-        }
-    }
 
     public function restartXray($c, $norestart = false)
     {
@@ -666,63 +623,6 @@ class Bot
         $this->setXrayStats($p);
     }
 
-    public function linkMtproto()
-    {
-        $s  = file_get_contents('/config/mtprotosecret');
-        $p  = getenv('TGPORT');
-        $d  = trim(file_get_contents('/config/mtprotodomain') ?: 'vk.com');
-        $d  = exec("echo $d | tr -d '\\n' | xxd -ps -c 200");
-        $ip = $this->getPacConf()['domain'] ?: $this->ip;
-        return "https://t.me/proxy?server=$ip&port=$p&secret=ee$s$d";
-    }
-
-    public function mtproto()
-    {
-        $d      = file_get_contents('/config/mtprotodomain') ?: 'vk.com';
-        $st     = $this->ssh('pgrep mtproto-proxy', 'tg') ? 'on' : 'off';
-        $text[] = "Menu -> MTProto\n";
-        $text[] = "status: $st\n";
-        $text[] = "fake domain: <code>$d</code>\n";
-        if ($st == 'on') {
-            $text[] = $this->linkMtproto();
-        }
-        $data[] = [
-            [
-                'text'          => $this->i18n('generateSecret'),
-                'callback_data' => "/generateSecret",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('setSecret'),
-                'callback_data' => "/setSecret",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('changeFakeDomain'),
-                'callback_data' => "/changeTGDomain",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('show QR'),
-                'callback_data' => "/qrMtproto",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('back'),
-                'callback_data' => "/menu",
-            ],
-        ];
-        $this->update(
-            $this->input['chat'],
-            $this->input['message_id'],
-            implode("\n", $text ?: ['...']),
-            $data ?: false,
-        );
-    }
 
     public function setLang($lang)
     {
@@ -771,29 +671,6 @@ class Bot
         $this->menu('pac');
     }
 
-    public function sspswd()
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter password",
-            $this->input['message_id'],
-            reply: 'enter password',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'sspwdch',
-            'args'           => [],
-        ];
-    }
-
-    public function ssPswdCheck()
-    {
-        $c = $this->getSSConfig();
-        if (empty($c['password']) || ($c['password'] == 'test')) {
-            $this->sspwdch(password_hash(time(), PASSWORD_DEFAULT), 1);
-        }
-    }
 
     public function changeCamouflage()
     {
@@ -1891,29 +1768,6 @@ class Bot
         }
     }
 
-    public function qrSS()
-    {
-        $conf    = $this->getPacConf();
-        $ip      = $this->ip;
-        $domain  = $this->getDomain();
-        $scheme  = empty($ssl = $this->nginxGetTypeCert()) ? 'http' : 'https';
-        $ss      = $this->getSSConfig();
-        $port    = !empty($ss['plugin']) ? (!empty($ssl) ? 443 : 80) : getenv('SSPORT');
-        $ss_link = preg_replace('~==~', '', 'ss://' . base64_encode("{$ss['method']}:{$ss['password']}")) . "@$domain:$port" . (!empty($ss['plugin']) ? '?plugin=' . urlencode("v2ray-plugin;path=/v2ray;host=$domain" . (!empty($ssl) ? ';tls' : '')) : '');
-        $qr_file = __DIR__ . "/qr/shadowsocks.png";
-        exec("qrencode -t png -o $qr_file '$ss_link'");
-        $r = $this->sendPhoto(
-            $this->input['chat'],
-            curl_file_create($qr_file),
-            "<code>$ss_link</code>"
-        );
-        unlink($qr_file);
-        if ($this->getPacConf()['blinkmenu']) {
-            $this->delete($this->input['chat'], $this->input['message_id']);
-            $this->input['message_id'] = $this->send($this->input['chat'], '.')['result']['message_id'];
-            $this->menu('ss');
-        }
-    }
 
     public function qrXray($i, $s = false)
     {
@@ -1933,23 +1787,6 @@ class Bot
         }
     }
 
-    public function qrMtproto()
-    {
-        $link    = $this->linkMtproto();
-        $qr_file = __DIR__ . "/qr/mtproto.png";
-        exec("qrencode -t png -o $qr_file '$link'");
-        $r = $this->sendPhoto(
-            $this->input['chat'],
-            curl_file_create($qr_file),
-            "<code>$link</code>"
-        );
-        unlink($qr_file);
-        if ($this->getPacConf()['blinkmenu']) {
-            $this->delete($this->input['chat'], $this->input['message_id']);
-            $this->input['message_id'] = $this->send($this->input['chat'], '.')['result']['message_id'];
-            $this->mtproto();
-        }
-    }
 
     public function upload($name, $code, $chat = false)
     {
@@ -4384,65 +4221,6 @@ DNS-over-HTTPS with IP:
         exec("php updatepac.php start {$this->input['chat']} {$this->input['message_id']} {$this->input['callback_id']} $import > /dev/null &");
     }
 
-    public function getSSConfig()
-    {
-        return json_decode(file_get_contents('/config/ssserver.json'), true);
-    }
-
-    public function getSSLocalConfig()
-    {
-        return json_decode(file_get_contents('/config/sslocal.json'), true);
-    }
-
-    public function menuSS()
-    {
-        $hash    = $this->getHashBot();
-        $domain  = $this->getDomain();
-        $ss      = $this->getSSConfig();
-        $v2ray   = !empty($ss['plugin']) ? 'ON' : 'OFF';
-        $port    = !empty($ss['plugin']) ? 443 : getenv('SSPORT');
-        $options = !empty($ss['plugin']) ? "tls;fast-open;path=/v2ray$hash;host=$domain" : "path=/v2ray$hash;host=$domain";
-
-        $text = "Menu -> ShadowSocks";
-        $data[] = [
-            [
-                'text'          => $this->i18n('change password'),
-                'callback_data' => "/sspswd",
-            ],
-        ];
-        $ss_link = preg_replace('~==~', '', 'ss://' . base64_encode("{$ss['method']}:{$ss['password']}")) . "@$domain:$port" . (!empty($ss['plugin']) ? '?plugin=' . urlencode("v2ray-plugin;path=/v2ray$hash;host=$domain;tls") : '');
-        $text .= "\n\n<code>$ss_link</code>\n";
-        $text .= "\n\npassword: <span class='tg-spoiler'>{$ss['password']}</span>";
-        $text .= "\n\nserver: <code>$domain:$port</code>";
-        $text .= "\n\nmethod: <code>{$ss['method']}</code>";
-        $text .= "\n\nnameserver: <code>10.10.0.5</code>";
-        if ($ss['plugin']) {
-            $text .= "\n\nplugin: <code>v2ray-plugin</code>";
-            $text .= "\n\nv2ray options: <code>$options</code>";
-        }
-        $data[] = [
-            [
-                'text'          => "v2ray: $v2ray",
-                'callback_data' => "/v2ray",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('show QR'),
-                'callback_data' => "/qrSS",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('back'),
-                'callback_data' => "/menu",
-            ],
-        ];
-        return [
-            'text' => $text,
-            'data' => $data,
-        ];
-    }
 
     public function i18n(string $menu): string
     {
@@ -4494,103 +4272,6 @@ DNS-over-HTTPS with IP:
         return implode("\n", $result);
     }
 
-    public function iodineDomain()
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter domain",
-            $this->input['message_id'],
-            reply: 'enter domain',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message' => $this->input['message_id'],
-            'callback'      => 'setIodineDomain',
-            'args'          => [],
-        ];
-    }
-
-    public function iodinePassword()
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter password",
-            $this->input['message_id'],
-            reply: 'enter password',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message' => $this->input['message_id'],
-            'callback'      => 'setIodinePassword',
-            'args'          => [],
-        ];
-    }
-
-    public function setIodinePassword($text)
-    {
-        $c = $this->getPacConf();
-        if ($text) {
-            $c['iodinePassword'] = $text;
-        } else {
-            unset($c['iodinePassword']);
-        }
-        $this->setPacConf($c);
-        $this->iodineRestart();
-        $this->iodine();
-    }
-
-    public function setIodineDomain($text)
-    {
-        $c = $this->getPacConf();
-        if ($text) {
-            $c['iodineDomain'] = $text;
-        } else {
-            unset($c['iodineDomain']);
-        }
-        $this->setPacConf($c);
-        $this->iodineRestart();
-        $this->iodine();
-    }
-
-    public function iodineRestart()
-    {
-        $c = $this->getPacConf();
-        $this->ssh('pkill iodine', 'io');
-        if (!empty($c['iodineDomain']) && !empty($c['iodinePassword'])) {
-            $this->ssh("iodined -c -P {$c['iodinePassword']} 10.0.0.1 {$c['iodineDomain']}", 'io');
-        }
-    }
-
-    public function iodine()
-    {
-        $c      = $this->getPacConf();
-        $text[] = 'Iodine';
-        $text[] = "domain: {$c['iodineDomain']}";
-        $text[] = "password: {$c['iodinePassword']}";
-
-        $data[] = [
-            [
-                'text'          => $this->i18n('set domain'),
-                'callback_data' => "/iodineDomain",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('set password'),
-                'callback_data' => "/iodinePassword",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('back'),
-                'callback_data' => "/menu",
-            ],
-        ];
-        $this->update(
-            $this->input['chat'],
-            $this->input['message_id'],
-            implode("\n", $text),
-            $data ?: false,
-        );
-    }
 
     public function menu($type = false, $arg = false, $return = false)
     {
@@ -4615,8 +4296,6 @@ DNS-over-HTTPS with IP:
 
             if (!empty($conf['domain'])) {
                 $main[] = '';
-                $oc     = $this->getHashSubdomain('oc');
-                $np     = $this->getHashSubdomain('np');
                 if (!empty($conf['domain'])) {
                     $ssl_expiry = $this->expireCert();
                     $certs      = $this->domainsCert() ?: [];
@@ -4624,8 +4303,6 @@ DNS-over-HTTPS with IP:
                     $main[] = "<blockquote>";
                     $main[] = "Domains:";
                     $main[] = $conf['domain'] . (in_array($conf['domain'], $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-                    $main[] = 'naive ' . "$np.{$conf['domain']}" . (in_array("$np.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
-                    $main[] = 'openconnect ' . "$oc.{$conf['domain']}" . (in_array("$oc.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '');
                     if (!empty($conf['adguardkey'])) {
                         $main[] = "{$conf['adguardkey']}.{$conf['domain']}" . (in_array("{$conf['adguardkey']}.{$conf['domain']}", $certs) ? ' (ssl: ' . date('Y-m-d H:i:s', $ssl_expiry) . ')' : '') . ' adguard DOT';;
                     }
@@ -4639,27 +4316,13 @@ DNS-over-HTTPS with IP:
             $main[] = '<code>';
             $main[] = $this->alignColumns([
                 [
-                    $this->i18n($this->ssh($this->getPacConf()['amnezia'] ? 'awg' : 'wg', 'wg') ? 'on' : 'off') . ' ' . $this->i18n($this->getPacConf()['amnezia'] ? 'amnezia' : 'wg_title'),
-                    $this->i18n($this->ssh($this->getPacConf()['wg1_amnezia'] ? 'awg' : 'wg', 'wg1') ? 'on' : 'off') . ' ' . $this->i18n($this->getPacConf()['wg1_amnezia'] ? 'amnezia' : 'wg_title'),
                     $this->i18n($this->ssh('pgrep xray', 'xr') ? 'on' : 'off') . ' ' . $this->i18n('xray'),
-                    $this->i18n($this->ssh('pgrep caddy', 'np') ? 'on' : 'off') . ' ' . $this->i18n('naive'),
-                    $this->i18n($this->ssh('pgrep ocserv', 'oc') ? 'on' : 'off') . ' ' . $this->i18n('ocserv'),
-                    $this->i18n($this->ssh('pgrep mtproto-proxy', 'tg') ? 'on' : 'off') . ' ' . $this->i18n('mtproto'),
                     $this->i18n(exec("JSON=1 timeout 2 dnslookup google.com ad") ? 'on' : 'off') . ' ' . $this->i18n('ad_title'),
-                    $this->i18n($this->ssh('pgrep ssserver', 'ss') ? 'on' : 'off') . ' ' . $this->i18n('sh_title'),
-                    $this->i18n($this->ssh('pgrep iodine', 'io') ? 'on' : 'off') . ' ' . $this->i18n('Iodine'),
                     $this->i18n($this->warpStatus()) . ' ' . $this->i18n('warp'),
                 ],
                 [
-                    $this->i18n($c['wg'] ? 'on' : 'off') . ' ' . getenv('WGPORT'),
-                    $this->i18n($c['wg1'] ? 'on' : 'off') . ' ' . getenv('WG1PORT'),
                     $this->i18n('on') . ' 443',
-                    $this->i18n('on') . ' 443',
-                    $this->i18n('on') . ' 443',
-                    $this->i18n($c['tg'] ? 'on' : 'off') . ' ' . getenv('TGPORT'),
                     $this->i18n($c['ad'] ? 'on' : 'off') . ' 853',
-                    $this->i18n($c['ss'] ? 'on' : 'off') . ' ' . getenv('SSPORT'),
-                    $this->i18n($c['io'] ? 'on' : 'off') . ' 53',
                     '',
                 ],
             ]);
@@ -8264,28 +7927,8 @@ DNS-over-HTTPS with IP:
         $pac = $this->getPacConf();
         $data   = [
             [[
-                'text'          => $this->i18n($c['wg'] ? 'on' : 'off') . ' ' . getenv('WGPORT') . ' Wireguard',
-                'callback_data' => "/hidePort wg",
-            ]],
-            [[
-                'text'          => $this->i18n($c['wg1'] ? 'on' : 'off') . ' ' . getenv('WG1PORT') . ' Wireguard',
-                'callback_data' => "/hidePort wg1",
-            ]],
-            [[
-                'text'          => $this->i18n($c['tg'] ? 'on' : 'off') . ' ' . getenv('TGPORT') . ' MTProto ',
-                'callback_data' => "/hidePort tg",
-            ]],
-            [[
                 'text'          => $this->i18n($c['ad'] ? 'on' : 'off') . ' 853 AdguardHome DoT',
                 'callback_data' => "/hidePort ad",
-            ]],
-            [[
-                'text'          => $this->i18n($c['ss'] ? 'on' : 'off') . ' 8388 Shadowsocks',
-                'callback_data' => "/hidePort ss",
-            ]],
-            [[
-                'text'          => $this->i18n($c['io'] ? 'on' : 'off') . ' 53 Iodine',
-                'callback_data' => "/hidePort io",
             ]],
         ];
         if (!empty($pac['restart'])) {
@@ -8313,13 +7956,11 @@ DNS-over-HTTPS with IP:
     public function hidePort($container)
     {
         $ports = [
-            'wg'  => getenv('WGPORT') . ':' . getenv('WGPORT') . '/udp',
-            'wg1' => getenv('WG1PORT') . ':' . getenv('WG1PORT') . '/udp',
-            'tg'  => getenv('TGPORT') . ':' . getenv('TGPORT'),
             'ad'  => '853:853',
-            'ss'  => '8388:8388',
-            'io'  => '53:53/udp',
         ];
+        if (!isset($ports[$container])) {
+            return;
+        }
         $f = '/docker/compose';
         $c = yaml_parse_file($f);
         if (!empty($c['services'][$container])) {

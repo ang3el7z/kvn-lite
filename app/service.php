@@ -13,15 +13,11 @@ if ($c['debug']) {
 $bot = new Bot($c['key'], $i);
 
 $bot->selfUpdate();
-$bot->ssPswdCheck();
-$bot->restartTG();
 if (!empty($bot->selfupdate)) {
     $bot->offWarp();
 }
 $bot->dontshowcron = 1;
-$bot->sslip();
 $bot->adguardSync();
 $bot->cloakNginx();
 $bot->syncDeny();
 $bot->cleanDocker();
-$bot->iodineRestart();
