@@ -5,18 +5,6 @@ $i = [
         'en' => 'Warp',
         'ru' => 'Warp',
     ],
-    'wg_title'             => [
-        'en' => 'Wireguard',
-        'ru' => 'Wireguard',
-    ],
-    'amnezia'             => [
-        'en' => 'Amnezia',
-        'ru' => 'Amnezia',
-    ],
-    'sh_title'             => [
-        'en' => 'Shadowsocks',
-        'ru' => 'Shadowsocks',
-    ],
     'ad_title'             => [
         'en' => 'AdGuard',
         'ru' => 'AdGuard',
@@ -166,8 +154,8 @@ $i = [
         'ru' => 'вебморда адгварда',
     ],
     'domain explain'       => [
-        'en' => 'Some clients require a valid certificate when connecting, such as windows 11 DoH or ShadowSocks Android (PAC url), this requires a domain',
-        'ru' => 'Некоторым клиентам требуется валидный сертификат при подключении, например Windows 11 DoH или ShadowSocks Android (URL-адрес PAC), для этого требуется домен',
+        'en' => 'Some clients require a valid certificate when connecting, such as windows 11 DoH, this requires a domain',
+        'ru' => 'Некоторым клиентам требуется валидный сертификат при подключении, например Windows 11 DoH, для этого требуется домен',
     ],
     'self list explain'    => [
         'en' => ' - domains that will work through a proxy, all others directly',
@@ -249,10 +237,6 @@ $i = [
         'en' => 'calc CIDR',
         'ru' => 'calc CIDR',
     ],
-    'mtproto'  => [
-        'en' => 'MTProto',
-        'ru' => 'MTProto',
-    ],
     'generateSecret'  => [
         'en' => 'generateSecret',
         'ru' => 'сгенерировать ключ',
@@ -312,14 +296,6 @@ $i = [
     'exchange'  => [
         'en' => 'client isolation',
         'ru' => 'изоляция клиентов',
-    ],
-    'ocserv'  => [
-        'en' => 'OpenConnect',
-        'ru' => 'OpenConnect',
-    ],
-    'naive'  => [
-        'en' => 'NaiveProxy',
-        'ru' => 'NaiveProxy',
     ],
     'change login'  => [
         'en' => 'change login',

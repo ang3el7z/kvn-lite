@@ -99,7 +99,6 @@ function start()
     }
     if (empty($domains)) {
         $text = "Empty domains. Delete pac files";
-        unlink(__DIR__ . '/zapretlists/mpac');
         unlink(__DIR__ . '/zapretlists/pac');
     } else {
         $domains = array_keys($domains);
@@ -107,30 +106,6 @@ function start()
         $size = count($domains);
         $curr = $j = 0;
         $time = microtime(true);
-        $f = fopen(__DIR__ . '/zapretlists/mpac', 'w');
-        $t = [];
-        foreach ($domains as $v) {
-            $curr ++;
-            $percent = (int) ceil($curr * 100 / $size);
-            $rotate = $curr != $size ? $load[$j % count($load)] : '';
-            $tail = <<<text
-                    Create pac for shadowsocks-android $percent% $rotate
-                    text;
-            if (microtime(true) - $time > 0.1) {
-                update($text . $tail);
-                $time = microtime(true);
-                $j++;
-            }
-            if ($exclude && preg_match('~' . implode('|', $exclude) . '~', $v)) {
-                continue;
-            }
-            fwrite($f, preg_quote($v) . "\n");
-
-            preg_match('~(.+)\.([^.]+)$~', $v, $m);
-            $t[$m[2]][strlen($m[1])][] = $m[1];
-        }
-        fclose($f);
-        $text .= $tail ? "$tail\n" : '';
 
         // create pac
         $domains = json_encode($t);
