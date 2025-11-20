@@ -553,7 +553,7 @@
 - улучшение отображения статуса пиров, отображение трафика
 <code>git pull</code>
 16.06.2023 исправлен скрипт автозагрузки
-<code>cd /root/vpnbot</code>
+<code>cd /root/kvn-lite</code>
 <code>git pull</code>
 <code>bash scripts/install_as_service.sh</code>
 12.06.2023

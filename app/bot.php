@@ -5433,7 +5433,7 @@ DNS-over-HTTPS with IP:
         $ip     = $this->getPacConf()['domain'] ?: $this->ip;
         $text[] = "Menu -> Mirror";
         $text[] = <<<PNG
-                    <pre>client -> intermediate VPS -> vpnbot
+                    <pre>client -> intermediate VPS -> kvn-lite
                                          ^           |
                                          |  install  |
                                          |  mirror   |
