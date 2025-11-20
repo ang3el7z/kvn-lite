@@ -1187,10 +1187,18 @@ class Bot
                             $list[$t[0]] = (bool) $t[1];
                         }
                     } elseif ($type == 'nodelist') {
-                        // Для нод парсим JSON
-                        $nodeData = isset($t[1]) ? json_decode($t[1], true) : null;
-                        if ($nodeData && is_array($nodeData)) {
-                            $list[$t[0]] = $nodeData;
+                        // Для нод сохраняем URL
+                        if (isset($t[1])) {
+                            // Проверяем, это URL или старый JSON формат
+                            if (preg_match('~^vless://~', $t[1]) || preg_match('~^[^:]+:vless://~', $t[1])) {
+                                $list[$t[0]] = ['url' => $t[1]];
+                            } else {
+                                // Старый формат JSON (для совместимости)
+                                $nodeData = json_decode($t[1], true);
+                                if ($nodeData && is_array($nodeData)) {
+                                    $list[$t[0]] = $nodeData;
+                                }
+                            }
                         }
                     } else {
                         $list[$t[0]] = (bool) $t[1];
@@ -2619,17 +2627,22 @@ DNS-over-HTTPS with IP:
             return;
         }
         if ($type == 'nodelist') {
-            // Парсим vless URL
-            $node = $this->parseVlessUrl(trim($domains));
-            if (!$node) {
+            // Сохраняем оригинальную vless ссылку
+            $url = trim($domains);
+            // Проверяем формат: name:vless://...
+            if (!preg_match('~^([^:]+):vless://~', $url, $m)) {
                 $this->send($this->input['from'], 'wrong vless URL format, expected: name:vless://uuid@server:port?params#remark');
                 return;
             }
+            $tag = $m[1];
             $conf = $this->getPacConf();
             if (!isset($conf['nodelist'])) {
                 $conf['nodelist'] = [];
             }
-            $conf['nodelist'][$node['tag']] = $node;
+            // Сохраняем оригинальную ссылку
+            $conf['nodelist'][$tag] = [
+                'url' => $url,
+            ];
             ksort($conf['nodelist']);
             $this->setPacConf($conf);
             $this->backXtlsList($type);
@@ -3826,8 +3839,13 @@ DNS-over-HTTPS with IP:
         if (!empty($domains)) {
             foreach ($domains as $k => $v) {
                 if ($type == 'nodelist') {
-                    // Для нод сохраняем как JSON
-                    $text .= "$k;" . json_encode($v, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n";
+                    // Для нод сохраняем URL
+                    if (is_array($v) && isset($v['url'])) {
+                        $text .= "$k;" . $v['url'] . "\n";
+                    } else {
+                        // Старый формат (для совместимости)
+                        $text .= "$k;" . json_encode($v, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n";
+                    }
                 } else {
                     $text .= "$k;$v\n";
                 }
@@ -4028,21 +4046,37 @@ DNS-over-HTTPS with IP:
         );
     }
 
-    public function parseVlessUrl($url)
+    /**
+     * Парсит vless URL в формат sing-box outbound
+     * Формат URL: name:vless://uuid@server:port?params#remark
+     */
+    public function parseVlessToSingBox($url)
     {
-        // Формат: nameproxy:vless://uuid@server:port?params#remark
-        // Пример: nameproxy:vless://3effd529-1dc7-4ba3-a3c6-22836acee5e5@cdn-2.akira.click:443?flow=&path=%2Fws1aed48eb&security=tls&sni=cdn-2.akira.click&fp=chrome&type=ws#[tg_1463932193]_masha
+        // Извлекаем vless часть (убираем name: префикс)
+        if (preg_match('~^[^:]+:(vless://.+)$~', $url, $prefixMatch)) {
+            $vlessUrl = $prefixMatch[1];
+        } else {
+            $vlessUrl = $url;
+        }
         
-        if (!preg_match('~^([^:]+):vless://([^@]+)@([^:]+):(\d+)(?:\?([^#]+))?(?:#(.+))?$~', $url, $m)) {
+        // Парсим vless://uuid@server:port?params#remark
+        if (!preg_match('~^vless://([^@]+)@([^:]+):(\d+)(?:\?([^#]+))?(?:#(.+))?$~', $vlessUrl, $m)) {
             return false;
         }
         
-        $tag = $m[1];
-        $uuid = $m[2];
-        $server = $m[3];
-        $port = (int)$m[4];
-        $params = isset($m[5]) ? $m[5] : '';
-        $remark = isset($m[6]) ? urldecode($m[6]) : '';
+        $uuid = $m[1];
+        $server = $m[2];
+        $port = (int)$m[3];
+        $params = isset($m[4]) ? $m[4] : '';
+        $remark = isset($m[5]) ? urldecode($m[5]) : '';
+        
+        // Извлекаем tag из оригинального URL
+        $tag = '';
+        if (preg_match('~^([^:]+):vless://~', $url, $tagMatch)) {
+            $tag = $tagMatch[1];
+        } else {
+            $tag = $remark ?: $server;
+        }
         
         // Парсим параметры
         parse_str($params, $query);
@@ -4074,6 +4108,19 @@ DNS-over-HTTPS with IP:
                     'enabled' => true,
                     'fingerprint' => $query['fp'],
                 ];
+            }
+            
+            // Reality настройки
+            if (isset($query['security']) && $query['security'] == 'reality') {
+                if (isset($query['pbk'])) {
+                    $node['tls']['reality'] = [
+                        'enabled' => true,
+                        'public_key' => $query['pbk'],
+                    ];
+                    if (isset($query['sid'])) {
+                        $node['tls']['reality']['short_id'] = $query['sid'];
+                    }
+                }
             }
         }
         
@@ -4111,6 +4158,104 @@ DNS-over-HTTPS with IP:
         return $node;
     }
 
+    /**
+     * Парсит vless URL в формат clash/mihomo proxy
+     * Формат URL: name:vless://uuid@server:port?params#remark
+     */
+    public function parseVlessToClash($url)
+    {
+        // Извлекаем vless часть (убираем name: префикс)
+        if (preg_match('~^[^:]+:(vless://.+)$~', $url, $prefixMatch)) {
+            $vlessUrl = $prefixMatch[1];
+        } else {
+            $vlessUrl = $url;
+        }
+        
+        // Парсим vless://uuid@server:port?params#remark
+        if (!preg_match('~^vless://([^@]+)@([^:]+):(\d+)(?:\?([^#]+))?(?:#(.+))?$~', $vlessUrl, $m)) {
+            return false;
+        }
+        
+        $uuid = $m[1];
+        $server = $m[2];
+        $port = (int)$m[3];
+        $params = isset($m[4]) ? $m[4] : '';
+        $remark = isset($m[5]) ? urldecode($m[5]) : '';
+        
+        // Извлекаем name из оригинального URL
+        $name = '';
+        if (preg_match('~^([^:]+):vless://~', $url, $nameMatch)) {
+            $name = $nameMatch[1];
+        } else {
+            $name = $remark ?: $server;
+        }
+        
+        // Парсим параметры
+        parse_str($params, $query);
+        
+        $proxy = [
+            'name' => $name,
+            'type' => 'vless',
+            'server' => $server,
+            'port' => $port,
+            'uuid' => $uuid,
+            'udp' => true,
+        ];
+        
+        // Network/Transport
+        $transportType = isset($query['type']) ? $query['type'] : 'tcp';
+        $proxy['network'] = $transportType;
+        
+        if ($transportType == 'ws') {
+            $proxy['ws-opts'] = [];
+            if (isset($query['path'])) {
+                $proxy['ws-opts']['path'] = urldecode($query['path']);
+            }
+            if (isset($query['host'])) {
+                $proxy['ws-opts']['headers'] = [
+                    'Host' => urldecode($query['host']),
+                ];
+            }
+        } elseif ($transportType == 'grpc') {
+            $proxy['grpc-opts'] = [];
+            if (isset($query['serviceName'])) {
+                $proxy['grpc-opts']['grpc-service-name'] = urldecode($query['serviceName']);
+            }
+        }
+        
+        // TLS настройки
+        $tlsEnabled = isset($query['security']) && ($query['security'] == 'tls' || $query['security'] == 'reality');
+        if ($tlsEnabled) {
+            $proxy['tls'] = true;
+            
+            if (isset($query['sni'])) {
+                $proxy['servername'] = $query['sni'];
+            }
+            
+            if (isset($query['fp'])) {
+                $proxy['client-fingerprint'] = $query['fp'];
+            }
+            
+            // Reality настройки
+            if (isset($query['security']) && $query['security'] == 'reality') {
+                $proxy['reality-opts'] = [];
+                if (isset($query['pbk'])) {
+                    $proxy['reality-opts']['public-key'] = $query['pbk'];
+                }
+                if (isset($query['sid'])) {
+                    $proxy['reality-opts']['short-id'] = $query['sid'];
+                }
+            }
+        }
+        
+        // Flow
+        if (isset($query['flow']) && !empty($query['flow'])) {
+            $proxy['flow'] = $query['flow'];
+        }
+        
+        return $proxy;
+    }
+
     public function listPac($type, $page, $menu, $basename = false)
     {
         $data[] = [
@@ -4131,8 +4276,14 @@ DNS-over-HTTPS with IP:
                     $text[] = "<blockquote><code>$k</code></blockquote>";
                 }
                 if ($type == 'nodelist') {
-                    // Для нод показываем только имя и сервер
-                    $server = is_array($v) && isset($v['server']) ? $v['server'] : '';
+                    // Для нод показываем имя и извлекаем сервер из URL
+                    $server = '';
+                    if (is_array($v) && isset($v['url'])) {
+                        // Извлекаем сервер из vless URL
+                        if (preg_match('~vless://[^@]+@([^:]+):~', $v['url'], $m)) {
+                            $server = $m[1];
+                        }
+                    }
                     $display = $k . ($server ? " ($server)" : '');
                     $data[] = [
                         [
@@ -7206,6 +7357,29 @@ DNS-over-HTTPS with IP:
                 }
                 break;
             case 'cl':
+                // Добавляем ноды в proxies перед основным proxy
+                if (!empty($pac['nodelist']) && is_array($pac['nodelist'])) {
+                    $proxies = [];
+                    foreach ($pac['nodelist'] as $nodeTag => $nodeConfig) {
+                        if (is_array($nodeConfig) && isset($nodeConfig['url'])) {
+                            // Парсим vless URL в формат clash/mihomo
+                            $proxy = $this->parseVlessToClash($nodeConfig['url']);
+                            if ($proxy) {
+                                $proxies[] = $proxy;
+                            }
+                        }
+                    }
+                    // Вставляем ноды перед основным proxy
+                    if (isset($c['proxies'][$index])) {
+                        // Вставляем ноды перед основным proxy
+                        array_splice($c['proxies'], $index, 0, $proxies);
+                        // Обновляем индекс основного proxy после вставки
+                        $index += count($proxies);
+                    } else {
+                        // Если не нашли основной proxy, добавляем ноды в начало
+                        $c['proxies'] = array_merge($proxies, $c['proxies']);
+                    }
+                }
                 $c['proxies'][$index]['server'] = '~domain~';
                 $c['proxies'][$index]['uuid']   = '~uid~';
                 if ($pac['transport'] != 'Reality') {
@@ -7264,17 +7438,19 @@ DNS-over-HTTPS with IP:
                 if (!empty($pac['nodelist']) && is_array($pac['nodelist'])) {
                     $nodes = [];
                     foreach ($pac['nodelist'] as $nodeTag => $nodeConfig) {
-                        if (is_array($nodeConfig) && !empty($nodeConfig['tag'])) {
-                            // Копируем конфигурацию ноды
-                            $node = $nodeConfig;
-                            // Убеждаемся, что все необходимые поля присутствуют
-                            if (!isset($node['packet_encoding'])) {
-                                $node['packet_encoding'] = '';
+                        if (is_array($nodeConfig) && isset($nodeConfig['url'])) {
+                            // Парсим vless URL в формат sing-box
+                            $node = $this->parseVlessToSingBox($nodeConfig['url']);
+                            if ($node) {
+                                // Убеждаемся, что все необходимые поля присутствуют
+                                if (!isset($node['packet_encoding'])) {
+                                    $node['packet_encoding'] = '';
+                                }
+                                if (!isset($node['domain_strategy'])) {
+                                    $node['domain_strategy'] = 'ipv4_only';
+                                }
+                                $nodes[] = $node;
                             }
-                            if (!isset($node['domain_strategy'])) {
-                                $node['domain_strategy'] = 'ipv4_only';
-                            }
-                            $nodes[] = $node;
                         }
                     }
                     // Вставляем ноды перед основным outbound (обычно он первый)
