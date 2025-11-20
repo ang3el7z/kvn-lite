@@ -27,31 +27,42 @@ else
 fi
 echo ""
 
-# Проверка логов
+# Проверка логов (внутри Docker контейнера)
 echo "2. Проверка логов:"
-LOG_DIR="/logs"
-if [ -d "$LOG_DIR" ]; then
-    echo "   ✓ Директория логов существует: $LOG_DIR"
+echo "   Примечание: Логи находятся внутри контейнера PHP"
+echo ""
+
+# Проверяем доступность Docker
+if command -v docker &> /dev/null; then
+    # Пытаемся получить имя контейнера PHP
+    PHP_CONTAINER=$(docker compose ps -q php 2>/dev/null || docker ps --filter "name=php" --format "{{.Names}}" | head -1)
     
-    # Проверяем основные логи
-    for log_file in "php_error" "auth_debug" "requests_error" "bot_input"; do
-        if [ -f "$LOG_DIR/$log_file" ]; then
-            SIZE=$(stat -f%z "$LOG_DIR/$log_file" 2>/dev/null || stat -c%s "$LOG_DIR/$log_file" 2>/dev/null || echo "0")
-            if [ "$SIZE" -gt 0 ]; then
-                echo "   ✓ $log_file существует ($SIZE байт)"
-                echo "   Последние 5 строк:"
-                tail -n 5 "$LOG_DIR/$log_file" | sed 's/^/      /'
-            else
-                echo "   ⚠ $log_file пуст"
-            fi
-        else
-            echo "   ⚠ $log_file не существует"
-        fi
+    if [ -n "$PHP_CONTAINER" ]; then
+        echo "   ✓ Контейнер PHP найден: $PHP_CONTAINER"
         echo ""
-    done
+        
+        # Проверяем логи внутри контейнера
+        for log_file in "php_error" "auth_debug" "requests_error" "bot_input"; do
+            echo "   Проверка /logs/$log_file:"
+            LOG_CONTENT=$(docker exec "$PHP_CONTAINER" sh -c "if [ -f /logs/$log_file ]; then tail -n 5 /logs/$log_file 2>/dev/null; else echo 'FILE_NOT_FOUND'; fi" 2>/dev/null)
+            
+            if [ "$LOG_CONTENT" = "FILE_NOT_FOUND" ]; then
+                echo "   ⚠ $log_file не существует в контейнере"
+            elif [ -z "$LOG_CONTENT" ]; then
+                echo "   ⚠ $log_file пуст"
+            else
+                echo "   ✓ $log_file существует, последние 5 строк:"
+                echo "$LOG_CONTENT" | sed 's/^/      /'
+            fi
+            echo ""
+        done
+    else
+        echo "   ⚠ Контейнер PHP не найден. Проверьте что контейнеры запущены:"
+        echo "      docker compose ps"
+    fi
 else
-    echo "   ✗ Директория логов не существует: $LOG_DIR"
-    echo "   Возможно, нужно создать её или проверить путь"
+    echo "   ⚠ Docker не установлен или недоступен"
+    echo "   Логи находятся в /logs/ внутри контейнера PHP"
 fi
 echo ""
 
@@ -69,14 +80,29 @@ else
 fi
 echo ""
 
-# Проверка процессов PHP
-echo "4. Проверка процессов PHP:"
-PHP_PROCESSES=$(ps aux | grep -i php | grep -v grep | wc -l)
-if [ "$PHP_PROCESSES" -gt 0 ]; then
-    echo "   ✓ Найдено PHP процессов: $PHP_PROCESSES"
-    ps aux | grep -i php | grep -v grep | head -3 | sed 's/^/      /'
+# Проверка контейнера PHP
+echo "4. Проверка контейнера PHP:"
+if command -v docker &> /dev/null; then
+    PHP_CONTAINER=$(docker compose ps -q php 2>/dev/null || docker ps --filter "name=php" --format "{{.Names}}" | head -1)
+    if [ -n "$PHP_CONTAINER" ]; then
+        CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' "$PHP_CONTAINER" 2>/dev/null)
+        if [ "$CONTAINER_STATUS" = "running" ]; then
+            echo "   ✓ Контейнер PHP запущен: $PHP_CONTAINER"
+            # Проверяем процессы внутри контейнера
+            PHP_PROCESSES=$(docker exec "$PHP_CONTAINER" sh -c "ps aux | grep -i php | grep -v grep | wc -l" 2>/dev/null || echo "0")
+            if [ "$PHP_PROCESSES" -gt 0 ]; then
+                echo "   ✓ PHP процессы работают внутри контейнера"
+            else
+                echo "   ⚠ PHP процессы не найдены внутри контейнера"
+            fi
+        else
+            echo "   ✗ Контейнер PHP не запущен (статус: $CONTAINER_STATUS)"
+        fi
+    else
+        echo "   ⚠ Контейнер PHP не найден"
+    fi
 else
-    echo "   ⚠ PHP процессы не найдены"
+    echo "   ⚠ Docker не установлен или недоступен"
 fi
 echo ""
 
@@ -98,9 +124,19 @@ echo ""
 echo "=== Конец проверки ==="
 echo ""
 echo "Рекомендации:"
-echo "1. Проверьте логи в /logs/php_error для ошибок PHP"
-echo "2. Проверьте /logs/auth_debug для проблем с авторизацией"
-echo "3. Проверьте /logs/requests_error для ошибок API Telegram"
-echo "4. Проверьте /logs/bot_input для входящих запросов"
-echo "5. Убедитесь, что webhook настроен правильно: https://YOUR_IP/tlgrm?k=BOT_TOKEN"
+echo "1. Проверьте логи внутри контейнера PHP:"
+echo "   docker compose exec php sh -c 'tail -50 /logs/php_error'"
+echo "   docker compose exec php sh -c 'tail -50 /logs/auth_debug'"
+echo "   docker compose exec php sh -c 'tail -50 /logs/requests_error'"
+echo "   docker compose exec php sh -c 'tail -50 /logs/bot_input'"
+echo ""
+echo "2. Или зайдите в контейнер:"
+echo "   docker compose exec php /bin/sh"
+echo "   tail -50 /logs/auth_debug"
+echo ""
+echo "3. Или используйте docker compose logs:"
+echo "   docker compose logs -f php"
+echo ""
+echo "4. Убедитесь, что webhook настроен правильно: https://YOUR_IP/tlgrm?k=BOT_TOKEN"
+echo "   Проверить: docker compose exec php php checkwebhook.php"
 
