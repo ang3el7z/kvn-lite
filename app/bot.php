@@ -321,14 +321,8 @@ class Bot
             case preg_match('~^/calc$~', $this->input['callback'], $m):
                 $this->calc();
                 break;
-            case preg_match('~^/changeIps (?P<arg>\w+(?:_(?:-)?\d+)?)$~', $this->input['callback'], $m):
-                $this->changeIps(...explode('_', $m['arg']));
-                break;
             case preg_match('~^/selfssl$~', $this->input['callback'], $m):
                 $this->selfssl();
-                break;
-            case preg_match('~^/changeCamouflage$~', $this->input['callback'], $m):
-                $this->changeCamouflage();
                 break;
             case preg_match('~^/addXrUser$~', $this->input['callback'], $m):
                 $this->addXrUser();
@@ -537,10 +531,6 @@ class Bot
         }
     }
 
-    public function generateSecret()
-    {
-        $this->secretSet(exec('head -c 16 /dev/urandom | xxd -ps'));
-    }
 
 
     public function restartXray($c, $norestart = false)
@@ -672,133 +662,7 @@ class Bot
     }
 
 
-    public function changeCamouflage()
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter camouflage key",
-            $this->input['message_id'],
-            reply: 'enter camouflage key',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chockey',
-            'args'           => [],
-        ];
-    }
 
-    public function changeOcDomain()
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter subdomain",
-            $this->input['message_id'],
-            reply: 'enter subdomain',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chOcSubdomain',
-            'args'           => [],
-        ];
-    }
-
-    public function changeOcDns()
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter dns",
-            $this->input['message_id'],
-            reply: 'enter password',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chocdns',
-            'args'           => [],
-        ];
-    }
-
-    public function changeOcPass()
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter pass",
-            $this->input['message_id'],
-            reply: 'enter password',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chocpass',
-            'args'           => [],
-        ];
-    }
-
-    public function changeNaiveUser()
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter login",
-            $this->input['message_id'],
-            reply: 'enter login',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chnplogin',
-            'args'           => [],
-        ];
-    }
-
-    public function changeNaiveSubdomain()
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter subdomain",
-            $this->input['message_id'],
-            reply: 'enter subdomain',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chNpSubdomain',
-            'args'           => [],
-        ];
-    }
-
-    public function changeNaivePass()
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter password",
-            $this->input['message_id'],
-            reply: 'enter password',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'chnppass',
-            'args'           => [],
-        ];
-    }
-
-    public function addOcUser()
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter name",
-            $this->input['message_id'],
-            reply: 'enter name',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'addocus',
-            'args'           => [],
-        ];
-    }
 
     public function addXrUser()
     {
@@ -856,104 +720,6 @@ class Bot
         }
     }
 
-    public function restartOcserv($conf)
-    {
-        file_put_contents('/config/ocserv.conf', $conf);
-        $this->ssh('pkill ocserv', 'oc');
-        $this->ssh('ocserv -c /etc/ocserv/ocserv.conf', 'oc');
-    }
-
-    public function restartNaive()
-    {
-        $pac = $this->getPacConf();
-        $this->ssh('pkill caddy', 'np');
-        $c = file_get_contents('/config/Caddyfile');
-        $t = preg_replace('~^(\t+)?basic_auth[^\n]+~sm', '$1basic_auth ' . ($pac['naive']['user'] ?? '_') . ' ' . ($pac['naive']['pass'] ?? '__'), $c);
-        file_put_contents('/config/Caddyfile', $t);
-        $this->ssh('caddy run -c /config/Caddyfile > /dev/null 2>&1 &', 'np', false);
-    }
-
-    public function chocdns($dns)
-    {
-        $c = file_get_contents('/config/ocserv.conf');
-        $t = preg_replace('~^dns[^\n]+~sm', "dns = $dns", $c);
-        $this->restartOcserv($t);
-        $this->menu('oc');
-    }
-
-    public function chOcSubdomain($domain)
-    {
-        $pac = $this->getPacConf();
-        if (empty($domain)) {
-            unset($pac["oc_domain"]);
-        } else {
-            $pac["oc_domain"] = $domain;
-        }
-        $this->setPacConf($pac);
-        $this->chocdomain($pac['domain']);
-        $this->setUpstreamDomainOcserv($pac['domain']);
-        $this->menu('oc');
-    }
-
-    public function chNpSubdomain($domain)
-    {
-        $pac = $this->getPacConf();
-        if (!empty($data)) {
-            unset($pac['np_domain']);
-        } else {
-            $pac['np_domain'] = $domain;
-        }
-        $this->setPacConf($pac);
-        $this->restartNaive();
-        $this->setUpstreamDomainNaive($pac['domain']);
-        $this->menu('naive');
-    }
-
-    public function chnplogin($user)
-    {
-        $pac = $this->getPacConf();
-        $pac['naive']['user'] = $user;
-        $this->setPacConf($pac);
-        $this->restartNaive();
-        $this->menu('naive');
-    }
-
-    public function chnppass($pass)
-    {
-        $pac = $this->getPacConf();
-        $pac['naive']['pass'] = $pass;
-        $this->setPacConf($pac);
-        $this->restartNaive();
-        $this->menu('naive');
-    }
-
-    public function chockey($pass)
-    {
-        $c = file_get_contents('/config/ocserv.conf');
-        $t = preg_replace('~^camouflage_secret[^\n]+~sm', "camouflage_secret = \"$pass\"", $c);
-        $this->restartOcserv($t);
-        $this->menu('oc');
-    }
-
-    public function chocdomain($domain)
-    {
-        $oc = $this->getHashSubdomain('oc');
-        $c  = file_get_contents('/config/ocserv.conf');
-        $t  = preg_replace('~^default-domain[^\n]+~sm', "default-domain = $oc.$domain", $c);
-        $this->restartOcserv($t);
-    }
-
-    public function chocpass($pass)
-    {
-        $pac = $this->getPacConf();
-        $pac['ocserv'] = $pass;
-        $this->setPacConf($pac);
-        $clients = $this->getClientsOc();
-        foreach ($clients as $k => $v) {
-            $this->ssh("echo '$pass' | ocpasswd -c /etc/ocserv/ocserv.passwd $v", 'oc');
-        }
-        $this->menu('oc');
-    }
 
     public function sspwdch($pass, $nomenu = false)
     {
@@ -1003,37 +769,6 @@ class Bot
         $this->menu('ss');
     }
 
-    public function rename(int $client, $page)
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter the title:",
-            $this->input['message_id'],
-            reply: 'enter the title:',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'renameClient',
-            'args'           => [$client, $page],
-        ];
-    }
-
-    public function timer(int $client, $page)
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter time like https://www.php.net/manual/ru/function.strtotime.php:",
-            $this->input['message_id'],
-            reply: 'enter time like https://www.php.net/manual/ru/function.strtotime.php:',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'timerClient',
-            'args'           => [$client, $page],
-        ];
-    }
 
     public function importList($type)
     {
@@ -1620,114 +1355,6 @@ class Bot
         $this->restartWG($this->createConfig($server));
     }
 
-    public function switchAmnezia($page = 0)
-    {
-        $c = $this->getPacConf();
-        $amnezia = $c[$this->getInstanceWG(1) . 'amnezia'] = $c[$this->getInstanceWG(1) . 'amnezia'] ? 0 : 1;
-        $this->setPacConf($c);
-
-        $pk = $this->presharedKey();
-        $ak = $this->amneziaKeys();
-        $clients = $this->readClients();
-        foreach ($clients as $k => $v) {
-            if (!empty($amnezia)) {
-                $clients[$k]['peers'][0]['PresharedKey'] = $pk;
-                $clients[$k]['interface']['Jc']          = $ak['Jc'];
-                $clients[$k]['interface']['Jmin']        = $ak['Jmin'];
-                $clients[$k]['interface']['Jmax']        = $ak['Jmax'];
-                $clients[$k]['interface']['S1']          = $ak['S1'];
-                $clients[$k]['interface']['S2']          = $ak['S2'];
-                $clients[$k]['interface']['H1']          = $ak['H1'];
-                $clients[$k]['interface']['H2']          = $ak['H2'];
-                $clients[$k]['interface']['H3']          = $ak['H3'];
-                $clients[$k]['interface']['H4']          = $ak['H4'];
-            } else {
-                unset($clients[$k]['peers'][0]['PresharedKey']);
-                unset($clients[$k]['interface']['Jc']);
-                unset($clients[$k]['interface']['Jmin']);
-                unset($clients[$k]['interface']['Jmax']);
-                unset($clients[$k]['interface']['S1']);
-                unset($clients[$k]['interface']['S2']);
-                unset($clients[$k]['interface']['H1']);
-                unset($clients[$k]['interface']['H2']);
-                unset($clients[$k]['interface']['H3']);
-                unset($clients[$k]['interface']['H4']);
-            }
-        }
-        $this->saveClients($clients);
-
-        $wg = $this->readConfig();
-        if (!empty($amnezia)) {
-            $wg['interface']['Jc']   = $ak['Jc'];
-            $wg['interface']['Jmin'] = $ak['Jmin'];
-            $wg['interface']['Jmax'] = $ak['Jmax'];
-            $wg['interface']['S1']   = $ak['S1'];
-            $wg['interface']['S2']   = $ak['S2'];
-            $wg['interface']['H1']   = $ak['H1'];
-            $wg['interface']['H2']   = $ak['H2'];
-            $wg['interface']['H3']   = $ak['H3'];
-            $wg['interface']['H4']   = $ak['H4'];
-        } else {
-            unset($wg['interface']['Jc']);
-            unset($wg['interface']['Jmin']);
-            unset($wg['interface']['Jmax']);
-            unset($wg['interface']['S1']);
-            unset($wg['interface']['S2']);
-            unset($wg['interface']['H1']);
-            unset($wg['interface']['H2']);
-            unset($wg['interface']['H3']);
-            unset($wg['interface']['H4']);
-        }
-
-        foreach ($wg['peers'] as $k => $v) {
-            if (!empty($amnezia)) {
-                $wg['peers'][$k]['PresharedKey'] = $pk;
-            } else {
-                unset($wg['peers'][$k]['PresharedKey']);
-            }
-        }
-        $this->restartWG($this->createConfig($wg), 1);
-        $this->menu('wg', $page);
-    }
-
-    public function switchTorrent($page = 0, $restart = false)
-    {
-        $c = $this->getPacConf();
-        $c[$this->getInstanceWG(1) . 'blocktorrent'] = $c[$this->getInstanceWG(1) . 'blocktorrent'] ? 0 : 1;
-        $this->setPacConf($c);
-        $this->iptablesWG();
-        $this->answer($this->input['callback_id'], 'доступ к торрентам ' . ($c[$this->getInstanceWG(1) . 'blocktorrent'] ? 'заблокирован' : 'разблокирован'), true);
-        $this->menu('wg', $page);
-    }
-
-    public function switchEndpoint($page = 0)
-    {
-        $c = $this->getPacConf();
-        $c[$this->getInstanceWG(1) . 'endpoint'] = $c[$this->getInstanceWG(1) . 'endpoint'] ? 0 : 1;
-        $this->setPacConf($c);
-        $this->menu('wg', $page);
-    }
-
-    public function iptablesWG()
-    {
-        $c = $this->getPacConf();
-        $this->ssh('iptables -F', $this->getInstanceWG());
-        if ($c['exchange']) {
-            $this->ssh('bash /block_exchange.sh', $this->getInstanceWG());
-        }
-        if ($c['blocktorrent']) {
-            $this->ssh('bash /block_torrent.sh', $this->getInstanceWG());
-        }
-    }
-    public function switchExchange($page)
-    {
-        $c = $this->getPacConf();
-        $c[$this->getInstanceWG(1) . 'exchange'] = $c[$this->getInstanceWG(1) . 'exchange'] ? 0 : 1;
-        $this->setPacConf($c);
-        $this->iptablesWG();
-        $this->answer($this->input['callback_id'], 'обмен между пользователями ' . ($c[$this->getInstanceWG(1) . 'exchange'] ? 'заблокирован' : 'разблокирован'), true);
-        $this->menu('wg', $page);
-    }
 
     public function blinkmenuswitch()
     {
@@ -1750,23 +1377,6 @@ class Bot
         unlink($qr_file);
     }
 
-    public function qrPeer($client)
-    {
-        $cl      = $client;
-        $client  = $this->readClients()[$client];
-        $name    = $this->getName($client['interface']);
-        if ($this->getWGType() == 'awg') {
-            $this->sendQr($name, preg_replace('/^vpn:\/\//', '', $this->getAmneziaShortLink($client)), "$name for AmneziaVPN");
-            $this->sendQr($name, $this->createConfig($client), "$name for AmneziaWG");
-        } else {
-            $this->sendQr($name, $this->createConfig($client), "$name for Wireguard");
-        }
-        if ($this->getPacConf()['blinkmenu']) {
-            $this->delete($this->input['chat'], $this->input['message_id']);
-            $this->input['message_id'] = $this->send($this->input['chat'], '.')['result']['message_id'];
-            $this->menu('client', "{$cl}_0");
-        }
-    }
 
 
     public function qrXray($i, $s = false)
@@ -1800,23 +1410,6 @@ class Bot
         return $r;
     }
 
-    public function proxy()
-    {
-        $proxy = trim($this->ssh("getent hosts proxy | awk '{ print $1 }'"));
-        $this->createPeer("$proxy/32", 'proxy');
-    }
-
-    public function addSubnets($page = 0)
-    {
-        $this->createPeer(implode(',', $this->getPacConf()['subnets']), 'list');
-    }
-
-    public function change_server_ip($ip)
-    {
-        $conf = $this->readConfig();
-        $conf['interface']['Address'] = $ip;
-        $this->restartWG($this->createConfig($conf));
-    }
 
     public function reply()
     {
@@ -1843,9 +1436,6 @@ class Bot
             $conf = $this->getPacConf();
             $conf['domain'] = idn_to_ascii($domain);
             $this->setPacConf($conf);
-            $this->chocdomain($domain);
-            $this->setUpstreamDomainOcserv($domain);
-            $this->setUpstreamDomainNaive($domain);
             $this->cloakNginx();
         }
         if (empty($nomenu)) {
@@ -1925,9 +1515,7 @@ class Bot
                 $out[] = 'Install certificate:';
                 $this->update($this->input['chat'], $this->input['message_id'], implode("\n", $out));
                 $adguardClient = $conf['adguardkey'] ? "-d {$conf['adguardkey']}.{$conf['domain']}" : '';
-                $oc = $this->getHashSubdomain('oc');
-                $np = $this->getHashSubdomain('np');
-                exec("certbot certonly --force-renew --preferred-chain 'ISRG Root X1' -n --agree-tos --email mail@{$conf['domain']} -d {$conf['domain']} -d $oc.{$conf['domain']} -d $np.{$conf['domain']} $adguardClient --webroot -w /certs/ --logs-dir /logs --max-log-backups 0 2>&1", $out, $code);
+                exec("certbot certonly --force-renew --preferred-chain 'ISRG Root X1' -n --agree-tos --email mail@{$conf['domain']} -d {$conf['domain']} $adguardClient --webroot -w /certs/ --logs-dir /logs --max-log-backups 0 2>&1", $out, $code);
                 if ($code > 0) {
                     $this->send($this->input['chat'], "ERROR\n" . implode("\n", $out));
                     break;
@@ -1984,8 +1572,6 @@ class Bot
         $conf = $this->getPacConf();
         unset($conf['domain']);
         $this->setPacConf($conf);
-        $this->setUpstreamDomainOcserv('');
-        $this->chocdomain('');
         $this->adguardSync();
         $this->cloakNginx();
         $this->menu('config');
@@ -2992,68 +2578,7 @@ DNS-over-HTTPS with IP:
         $this->menu('client', "{$client}_$page");
     }
 
-    public function subnetAdd($wgpage, $page, $openconnect)
-    {
-        $r = $this->send(
-            $this->input['chat'],
-            "@{$this->input['username']} enter subnet separated by commas",
-            $this->input['message_id'],
-            reply: 'enter subnet separated by commas',
-        );
-        $_SESSION['reply'][$r['result']['message_id']] = [
-            'start_message'  => $this->input['message_id'],
-            'start_callback' => $this->input['callback_id'],
-            'callback'       => 'subnetSave',
-            'args'           => [$wgpage, $page, $openconnect],
-        ];
-    }
 
-    public function subnetSave($text, $wgpage, $page, $openconnect)
-    {
-        $c = $this->getPacConf();
-        $subnets = explode(',', $text);
-        if ($subnets) {
-            $c['subnets'] = array_merge($c['subnets'] ?: [], array_filter(array_map(fn ($e) => trim($e), $subnets)));
-            $this->setPacConf($c);
-            $page = floor(count($c['subnets']) / $this->limit);
-        }
-        if (!empty($openconnect)) {
-            $this->ocservRoute();
-        }
-        $this->subnet($wgpage, $page, $openconnect);
-    }
-
-    public function subnetDelete($wgpage, $k, $page = 0, $openconnect = 0)
-    {
-        $c = $this->getPacConf();
-        unset($c['subnets'][$k]);
-        $this->setPacConf($c);
-        if (!empty($openconnect)) {
-            $this->ocservRoute();
-        }
-        $this->subnet($wgpage, $page, $openconnect);
-    }
-
-    public function ocservRoute()
-    {
-        $p = $this->getPacConf();
-        $c = file_get_contents('/config/ocserv.conf');
-        $t = preg_replace('~^route[^\n]+~sm', '', $c);
-        if (!empty($p['subnets'])) {
-            foreach ($p['subnets'] as $v) {
-                if (preg_match('~^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}~', $v)) {
-                    $t .= "route = $v";
-                    $flag = true;
-                }
-            }
-            if (empty($flag)) {
-                $t .= 'route = default';
-            }
-        } else {
-            $t .= 'route = default';
-        }
-        $this->restartOcserv($t);
-    }
 
     public function calc()
     {
@@ -5367,40 +4892,6 @@ DNS-over-HTTPS with IP:
         $this->dockerApi('/build/prune', 'POST');
     }
 
-    public function naiveMenu()
-    {
-        $pac    = $this->getPacConf();
-        $domain = $this->getDomain();
-        $text[] = "Menu -> NaiveProxy";
-        $np     = $this->getHashSubdomain('np');
-        $text[] = "<code>https://{$pac['naive']['user']}:{$pac['naive']['pass']}@$np.$domain</code>";
-        $data[] = [
-            [
-                'text'          => $this->i18n('change subdomain'),
-                'callback_data' => "/changeNaiveSubdomain",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('change login'),
-                'callback_data' => "/changeNaiveUser",
-            ],
-            [
-                'text'          => $this->i18n('change password'),
-                'callback_data' => "/changeNaivePass",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('back'),
-                'callback_data' => "/menu",
-            ],
-        ];
-        return [
-            'text' => implode("\n", $text),
-            'data' => $data,
-        ];
-    }
 
     public function mirrorMenu()
     {
@@ -5451,105 +4942,6 @@ DNS-over-HTTPS with IP:
         $this->sendFile($this->input['from'], new CURLStringFile($t, 'socat.sh', 'application/x-sh'));
     }
 
-    public function ocMenu()
-    {
-        $pac    = $this->getPacConf();
-        $domain = $this->getDomain();
-        $ocserv = file_get_contents('/config/ocserv.conf');
-        preg_match('~^camouflage_secret[^\n]+?"([^"]+)*"~sm', $ocserv, $m);
-        $cs = $m[1];
-        preg_match('~^dns = ([^\n]+)~sm', $ocserv, $m);
-        $dns = $m[1];
-        preg_match('~^expose-iroutes = (true)~sm', $ocserv, $m);
-        $expose = $m[1];
-        $pass   = htmlspecialchars($pac['ocserv']);
-        $text[] = "Menu -> OpenConnect";
-        if (!empty($cs)) {
-            $oc = $this->getHashSubdomain('oc');
-            $text[] = "<code>https://$oc.$domain/?$cs</code>";
-        }
-        $text[] = "password: <span class='tg-spoiler'>$pass</span>";
-        $data[] = [
-            [
-                'text'          => $this->i18n('change subdomain'),
-                'callback_data' => "/changeOcDomain",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('change secret'),
-                'callback_data' => "/changeCamouflage",
-            ],
-            [
-                'text'          => $this->i18n('change password'),
-                'callback_data' => "/changeOcPass",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('dns') . ": $dns",
-                'callback_data' => "/changeOcDns",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          =>  $this->i18n('listSubnet'),
-                'callback_data' => "/subnet 0_0_1",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('expose-iroutes') . ' ' . $this->i18n($expose ? 'on' : 'off'),
-                'callback_data' => "/changeOcExpose",
-            ],
-        ];
-        $data[] = [
-            [
-                'text'          => $this->i18n('add peer'),
-                'callback_data' => "/addOcUser",
-            ],
-        ];
-        $clients = $this->getClientsOc();
-        foreach ($clients as $k => $v) {
-            $data[] = [
-                [
-                    'text'          => $this->i18n('delete') . " $v",
-                    'callback_data' => "/deloc $k",
-                ],
-            ];
-        }
-        $data[] = [
-            [
-                'text'          => $this->i18n('back'),
-                'callback_data' => "/menu",
-            ],
-        ];
-        return [
-            'text' => implode("\n", $text),
-            'data' => $data,
-        ];
-    }
-
-    public function changeOcExpose()
-    {
-        $c = file_get_contents('/config/ocserv.conf');
-        preg_match('~^expose-iroutes = ([^\n]+)~sm', $c, $m);
-        $t = preg_replace('~^expose-iroutes[^\n]+~sm', "expose-iroutes = " . ($m[1] == 'true' ? 'false' : 'true'), $c);
-        $this->restartOcserv($t);
-        $this->menu('oc');
-    }
-
-    public function deloc($i)
-    {
-        $clients = $this->getClientsOc();
-        foreach ($clients as $k => $v) {
-            if ($i == $k) {
-                $this->ssh("ocpasswd -c /etc/ocserv/ocserv.passwd -d $v", 'oc');
-                break;
-            }
-        }
-        $this->menu('oc');
-    }
 
     public function delxr($i)
     {
@@ -5569,18 +4961,6 @@ DNS-over-HTTPS with IP:
         $this->xray();
     }
 
-    public function getClientsOc()
-    {
-        $users = array_filter(explode("\n", file_get_contents('/config/ocserv.passwd')), fn ($e) => !empty($e));
-        return array_map(fn($e) => explode(':', $e)[0], $users);
-    }
-
-    public function addocus($user)
-    {
-        $pac = $this->getPacConf();
-        $this->ssh("echo '{$pac['ocserv']}' | ocpasswd -c /etc/ocserv/ocserv.passwd $user", 'oc');
-        $this->menu('oc');
-    }
 
     public function addxrus($users)
     {
@@ -7388,22 +6768,6 @@ DNS-over-HTTPS with IP:
     {
         $nginx = file_get_contents('/config/upstream.conf');
         $t = preg_replace('~#domain.+#domain~s', "#domain\n$domain reality;\n#domain", $nginx);
-        file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'up');
-    }
-    public function setUpstreamDomainOcserv($domain)
-    {
-        $sub   = $this->getHashSubdomain('oc');
-        $nginx = file_get_contents('/config/upstream.conf');
-        $t     = preg_replace('~#ocserv.+#ocserv~s', $domain ? "#ocserv\n$sub.$domain ocserv;\n#ocserv" : "#ocserv\n#$sub.\$domain ocserv;\n#ocserv", $nginx);
-        file_put_contents('/config/upstream.conf', $t);
-        $this->ssh("nginx -s reload 2>&1", 'up');
-    }
-    public function setUpstreamDomainNaive($domain)
-    {
-        $sub   = $this->getHashSubdomain('np');
-        $nginx = file_get_contents('/config/upstream.conf');
-        $t = preg_replace('~#naive.+#naive~s', $domain ? "#naive\n$sub.$domain naive;\n#naive" : "#naive\n#$sub.\$domain naive;\n#naive", $nginx);
         file_put_contents('/config/upstream.conf', $t);
         $this->ssh("nginx -s reload 2>&1", 'up');
     }
