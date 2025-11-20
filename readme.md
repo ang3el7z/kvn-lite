@@ -17,8 +17,5 @@ wget -O- https://raw.githubusercontent.com/ang3el7z/kvn-lite/master/scripts/init
 ```shell
 make r
 ```
-#### autoload:
-```shell
-crontab -e
-```
-add `@reboot cd /root/vpnbot && make r` and save
+
+> **Примечание:** Автозапуск при перезагрузке сервера настраивается автоматически при установке через скрипт `init.sh`
