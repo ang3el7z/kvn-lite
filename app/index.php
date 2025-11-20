@@ -1,6 +1,32 @@
 <?php
 
+// Глобальная обработка ошибок
+set_error_handler(function($errno, $errstr, $errfile, $errline) {
+    $error = date('Y-m-d H:i:s') . " - PHP Error [$errno]: $errstr in $errfile on line $errline\n";
+    file_put_contents('/logs/php_error', $error, FILE_APPEND);
+    return false;
+});
+
+register_shutdown_function(function() {
+    $error = error_get_last();
+    if ($error !== NULL && in_array($error['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR, E_PARSE])) {
+        $error_msg = date('Y-m-d H:i:s') . " - Fatal Error: {$error['message']} in {$error['file']} on line {$error['line']}\n";
+        file_put_contents('/logs/php_error', $error_msg, FILE_APPEND);
+    }
+});
+
 require __DIR__ . '/timezone.php';
+
+// Проверка существования config.php
+if (!file_exists(__DIR__ . '/config.php')) {
+    file_put_contents('/logs/php_error', date('Y-m-d H:i:s') . " - CRITICAL: config.php not found! Creating default config.\n", FILE_APPEND);
+    // Создаем минимальный config.php если его нет
+    if (empty($c)) {
+        $c = ['key' => getenv('BOT_TOKEN') ?: ''];
+    }
+    file_put_contents(__DIR__ . '/config.php', "<?php\n\n\$c = " . var_export($c, true) . ";\n");
+}
+
 require __DIR__ . '/config.php';
 if ($c['debug']) {
     require __DIR__ . '/debug.php';
@@ -11,8 +37,15 @@ require __DIR__ . '/i18n.php';
 if (file_exists(__DIR__ . '/override.php')) {
     include __DIR__ . '/override.php';
 }
-$bot  = new Bot($c['key'], $i);
-$hash = $bot->getHashBot();
+
+try {
+    $bot  = new Bot($c['key'], $i);
+    $hash = $bot->getHashBot();
+} catch (Exception $e) {
+    file_put_contents('/logs/php_error', date('Y-m-d H:i:s') . " - Exception in index.php: " . $e->getMessage() . "\n", FILE_APPEND);
+    http_response_code(500);
+    exit;
+}
 if (!empty($_GET['hash'])) {
     $t = $_GET;
     unset($t['hash']);
@@ -28,7 +61,13 @@ if (!empty($_GET['hash'])) {
 switch (true) {
     // tlgrm
     case 'POST' == $_SERVER['REQUEST_METHOD'] && preg_match('~^/tlgrm~', $_SERVER['REQUEST_URI']) && $_GET['k'] == $c['key']:
-        $bot->input();
+        try {
+            file_put_contents('/logs/bot_input', date('Y-m-d H:i:s') . " - Received webhook\n" . file_get_contents('php://input') . "\n\n", FILE_APPEND);
+            $bot->input();
+        } catch (Exception $e) {
+            file_put_contents('/logs/php_error', date('Y-m-d H:i:s') . " - Exception in bot->input(): " . $e->getMessage() . "\n" . $e->getTraceAsString() . "\n", FILE_APPEND);
+            http_response_code(500);
+        }
         break;
 
     // save template

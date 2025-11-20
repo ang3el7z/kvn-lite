@@ -82,16 +82,38 @@ class Bot
             return;
         }
         $file = __DIR__ . '/config.php';
-        require $file;
+        
+        // Логирование попытки авторизации
+        file_put_contents('/logs/auth_debug', date('Y-m-d H:i:s') . " - Auth attempt from: " . ($this->input['from'] ?? 'unknown') . "\n", FILE_APPEND);
+        
+        if (!file_exists($file)) {
+            file_put_contents('/logs/auth_debug', date('Y-m-d H:i:s') . " - ERROR: config.php not found!\n", FILE_APPEND);
+            // Попытка создать базовый config.php если его нет
+            if (!isset($c)) {
+                $c = [];
+            }
+        } else {
+            require $file;
+        }
+        
         if (empty($c['admin'])) {
+            file_put_contents('/logs/auth_debug', date('Y-m-d H:i:s') . " - Creating first admin: " . $this->input['from'] . "\n", FILE_APPEND);
             $c['admin'] = [$this->input['from']];
-            file_put_contents($file, "<?php\n\n\$c = " . var_export($c, true) . ";\n");
+            $result = file_put_contents($file, "<?php\n\n\$c = " . var_export($c, true) . ";\n");
+            if ($result === false) {
+                file_put_contents('/logs/auth_debug', date('Y-m-d H:i:s') . " - ERROR: Failed to write config.php!\n", FILE_APPEND);
+            } else {
+                file_put_contents('/logs/auth_debug', date('Y-m-d H:i:s') . " - Successfully created admin in config.php\n", FILE_APPEND);
+            }
         } elseif (!is_array($c['admin'])) {
             $c['admin'] = [$c['admin']];
             file_put_contents($file, "<?php\n\n\$c = " . var_export($c, true) . ";\n");
         } elseif (!in_array($this->input['from'], $c['admin'])) {
+            file_put_contents('/logs/auth_debug', date('Y-m-d H:i:s') . " - User " . $this->input['from'] . " is not authorized\n", FILE_APPEND);
             // $this->send($this->input['chat'], 'you are not authorized', $this->input['message_id']);
             exit;
+        } else {
+            file_put_contents('/logs/auth_debug', date('Y-m-d H:i:s') . " - User " . $this->input['from'] . " is authorized\n", FILE_APPEND);
         }
     }
 
@@ -8015,15 +8037,17 @@ DNS-over-HTTPS with IP:
         ]);
         $res = curl_exec($ch);
         $r   = json_decode($res, true);
-        if (!empty($res['description']) || is_null($res)) {
-            file_put_contents('/logs/requests_error', var_export([
-                'r' => [
-                    'method' => $method,
-                    'data'   => $data,
-                ],
-                'a' => $res,
-            ], true) . "\n", FILE_APPEND);
+        if ((!empty($r['description']) && !$r['ok']) || is_null($r) || curl_getinfo($ch, CURLINFO_HTTP_CODE) != 200) {
+            file_put_contents('/logs/requests_error', date('Y-m-d H:i:s') . "\n" . var_export([
+                'method' => $method,
+                'data'   => $data,
+                'response' => $res,
+                'decoded' => $r,
+                'curl_error' => curl_error($ch),
+                'http_code' => curl_getinfo($ch, CURLINFO_HTTP_CODE),
+            ], true) . "\n\n", FILE_APPEND);
         }
+        curl_close($ch);
         return $r;
     }
 
