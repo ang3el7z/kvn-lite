@@ -468,6 +468,9 @@ class Bot
             case preg_match('~^/xtlsrulesset(?: (\d+))?$~', $this->input['callback'], $m):
                 $this->xtlsrulesset($m[1] ?: 0);
                 break;
+            case preg_match('~^/xtlsnode(?: (\d+))?$~', $this->input['callback'], $m):
+                $this->xtlsnode($m[1] ?: 0);
+                break;
             case preg_match('~^/templateCopy (\w+)(?: (.+))?$~', $this->input['callback'], $m):
                 $this->templateCopy($m[1], $m[2]);
                 break;
@@ -1178,10 +1181,16 @@ class Bot
         if (!empty($f)) {
             foreach (explode("\n", $f) as $v) {
                 if (!empty($s = trim($v))) {
-                    $t = explode(';', $s);
+                    $t = explode(';', $s, 2);
                     if ($type == 'rulessetlist') {
                         if (preg_match('~^.+:.+:https?://.+~', $t[0])) {
                             $list[$t[0]] = (bool) $t[1];
+                        }
+                    } elseif ($type == 'nodelist') {
+                        // Для нод парсим JSON
+                        $nodeData = isset($t[1]) ? json_decode($t[1], true) : null;
+                        if ($nodeData && is_array($nodeData)) {
+                            $list[$t[0]] = $nodeData;
                         }
                     } else {
                         $list[$t[0]] = (bool) $t[1];
@@ -2578,6 +2587,14 @@ DNS-over-HTTPS with IP:
                     reply: 'outbound[:behavior]:time:URL',
                 );
                 break;
+            case 'nodelist':
+                $r = $this->send(
+                    $this->input['chat'],
+                    "@{$this->input['username']} enter vless URL (format: name:vless://uuid@server:port?params#remark)",
+                    $this->input['message_id'],
+                    reply: 'enter vless URL',
+                );
+                break;
 
             default:
                 $r = $this->send(
@@ -2599,6 +2616,23 @@ DNS-over-HTTPS with IP:
     {
         if ($type == 'rulessetlist' && !preg_match('~^.+:.+:https?://.+~', $domains)) {
             $this->send($this->input['from'], 'wrong pattern, enter [direct|block|proxy|custom outbound]:time:URL');
+            return;
+        }
+        if ($type == 'nodelist') {
+            // Парсим vless URL
+            $node = $this->parseVlessUrl(trim($domains));
+            if (!$node) {
+                $this->send($this->input['from'], 'wrong vless URL format, expected: name:vless://uuid@server:port?params#remark');
+                return;
+            }
+            $conf = $this->getPacConf();
+            if (!isset($conf['nodelist'])) {
+                $conf['nodelist'] = [];
+            }
+            $conf['nodelist'][$node['tag']] = $node;
+            ksort($conf['nodelist']);
+            $this->setPacConf($conf);
+            $this->backXtlsList($type);
             return;
         }
         $domains = explode(',', $domains);
@@ -2648,6 +2682,9 @@ DNS-over-HTTPS with IP:
                 break;
             case 'rulessetlist':
                 $this->xtlsrulesset();
+                break;
+            case 'nodelist':
+                $this->xtlsnode();
                 break;
             case 'white':
             case 'deny':
@@ -3788,7 +3825,12 @@ DNS-over-HTTPS with IP:
         $domains = $this->getPacConf()[$type];
         if (!empty($domains)) {
             foreach ($domains as $k => $v) {
-                $text .= "$k;$v\n";
+                if ($type == 'nodelist') {
+                    // Для нод сохраняем как JSON
+                    $text .= "$k;" . json_encode($v, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n";
+                } else {
+                    $text .= "$k;$v\n";
+                }
             }
             $this->sendFile(
                 $this->input['chat'],
@@ -3966,6 +4008,109 @@ DNS-over-HTTPS with IP:
         );
     }
 
+    public function xtlsnode($page = 0)
+    {
+        $text[] = "Menu -> " . $this->i18n('xray') . ' -> ' . $this->i18n('routes') . ' -> node list';
+
+        [$data, $tmp] = $this->listPac('nodelist', $page, 'xtlsnode', 1);
+        $text = array_merge($text, $tmp ?: []);
+        $data[] = [
+            [
+                'text'          => $this->i18n('back'),
+                'callback_data' => "/routes",
+            ],
+        ];
+        $this->update(
+            $this->input['chat'],
+            $this->input['message_id'],
+            implode("\n", $text ?: ['...']),
+            $data ?: false,
+        );
+    }
+
+    public function parseVlessUrl($url)
+    {
+        // Формат: nameproxy:vless://uuid@server:port?params#remark
+        // Пример: nameproxy:vless://3effd529-1dc7-4ba3-a3c6-22836acee5e5@cdn-2.akira.click:443?flow=&path=%2Fws1aed48eb&security=tls&sni=cdn-2.akira.click&fp=chrome&type=ws#[tg_1463932193]_masha
+        
+        if (!preg_match('~^([^:]+):vless://([^@]+)@([^:]+):(\d+)(?:\?([^#]+))?(?:#(.+))?$~', $url, $m)) {
+            return false;
+        }
+        
+        $tag = $m[1];
+        $uuid = $m[2];
+        $server = $m[3];
+        $port = (int)$m[4];
+        $params = isset($m[5]) ? $m[5] : '';
+        $remark = isset($m[6]) ? urldecode($m[6]) : '';
+        
+        // Парсим параметры
+        parse_str($params, $query);
+        
+        $node = [
+            'packet_encoding' => '',
+            'server' => $server,
+            'server_port' => $port,
+            'uuid' => $uuid,
+            'type' => 'vless',
+            'domain_strategy' => 'ipv4_only',
+            'tag' => $tag,
+        ];
+        
+        // TLS настройки
+        $tlsEnabled = isset($query['security']) && ($query['security'] == 'tls' || $query['security'] == 'reality');
+        if ($tlsEnabled) {
+            $node['tls'] = [
+                'enabled' => true,
+                'insecure' => false,
+            ];
+            
+            if (isset($query['sni'])) {
+                $node['tls']['server_name'] = $query['sni'];
+            }
+            
+            if (isset($query['fp'])) {
+                $node['tls']['utls'] = [
+                    'enabled' => true,
+                    'fingerprint' => $query['fp'],
+                ];
+            }
+        }
+        
+        // Transport настройки
+        $transportType = isset($query['type']) ? $query['type'] : 'tcp';
+        if ($transportType == 'ws') {
+            $node['transport'] = [
+                'type' => 'ws',
+            ];
+            
+            if (isset($query['path'])) {
+                $node['transport']['path'] = urldecode($query['path']);
+            }
+            
+            if (isset($query['host'])) {
+                $node['transport']['headers'] = [
+                    'Host' => urldecode($query['host']),
+                ];
+            }
+        } elseif ($transportType == 'grpc') {
+            $node['transport'] = [
+                'type' => 'grpc',
+            ];
+            
+            if (isset($query['serviceName'])) {
+                $node['transport']['service_name'] = urldecode($query['serviceName']);
+            }
+        }
+        
+        // Flow
+        if (isset($query['flow']) && !empty($query['flow'])) {
+            $node['flow'] = $query['flow'];
+        }
+        
+        return $node;
+    }
+
     public function listPac($type, $page, $menu, $basename = false)
     {
         $data[] = [
@@ -3985,16 +4130,28 @@ DNS-over-HTTPS with IP:
                 if ($type == 'rulessetlist') {
                     $text[] = "<blockquote><code>$k</code></blockquote>";
                 }
-                $data[] = [
-                    [
-                        'text'          => $this->i18n($v ? 'on' : 'off') . ' ' . ($basename ? basename($k) . ' ' : '') . (in_array($type, ['rulessetlist', 'packagelist', 'processlist', 'subnetlist']) ? $k : idn_to_utf8($k)),
-                        'callback_data' => "/change$type " . ($i + $page * $this->limit),
-                    ],
-                    [
-                        'text'          => 'delete',
-                        'callback_data' => "/delete$type " . ($i + $page * $this->limit),
-                    ],
-                ];
+                if ($type == 'nodelist') {
+                    // Для нод показываем только имя и сервер
+                    $server = is_array($v) && isset($v['server']) ? $v['server'] : '';
+                    $display = $k . ($server ? " ($server)" : '');
+                    $data[] = [
+                        [
+                            'text'          => $display,
+                            'callback_data' => "/delete$type " . ($i + $page * $this->limit),
+                        ],
+                    ];
+                } else {
+                    $data[] = [
+                        [
+                            'text'          => $this->i18n($v ? 'on' : 'off') . ' ' . ($basename ? basename($k) . ' ' : '') . (in_array($type, ['rulessetlist', 'packagelist', 'processlist', 'subnetlist']) ? $k : idn_to_utf8($k)),
+                            'callback_data' => "/change$type " . ($i + $page * $this->limit),
+                        ],
+                        [
+                            'text'          => 'delete',
+                            'callback_data' => "/delete$type " . ($i + $page * $this->limit),
+                        ],
+                    ];
+                }
                 $i++;
             }
             if ($all > 1) {
@@ -4046,7 +4203,10 @@ DNS-over-HTTPS with IP:
             if ($key == $i) {
                 switch ($action) {
                     case 'change':
-                        $conf[$type][$k] = !$v;
+                        // Для nodelist нет переключения on/off
+                        if ($type != 'nodelist') {
+                            $conf[$type][$k] = !$v;
+                        }
                         break;
                     case 'delete':
                         unset($conf[$type][$k]);
@@ -6207,6 +6367,10 @@ DNS-over-HTTPS with IP:
                 'text'          => $this->i18n('rulesset'),
                 'callback_data' => "/xtlsrulesset",
             ]],
+            [[
+                'text'          => 'node',
+                'callback_data' => "/xtlsnode",
+            ]],
         ];
         $data[] = [
             [
@@ -7096,6 +7260,40 @@ DNS-over-HTTPS with IP:
                 }
                 break;
             case 'si':
+                // Добавляем ноды в outbounds перед основным outbound
+                if (!empty($pac['nodelist']) && is_array($pac['nodelist'])) {
+                    $nodes = [];
+                    foreach ($pac['nodelist'] as $nodeTag => $nodeConfig) {
+                        if (is_array($nodeConfig) && !empty($nodeConfig['tag'])) {
+                            // Копируем конфигурацию ноды
+                            $node = $nodeConfig;
+                            // Убеждаемся, что все необходимые поля присутствуют
+                            if (!isset($node['packet_encoding'])) {
+                                $node['packet_encoding'] = '';
+                            }
+                            if (!isset($node['domain_strategy'])) {
+                                $node['domain_strategy'] = 'ipv4_only';
+                            }
+                            $nodes[] = $node;
+                        }
+                    }
+                    // Вставляем ноды перед основным outbound (обычно он первый)
+                    // Находим индекс основного outbound
+                    $mainOutboundIndex = null;
+                    foreach ($c['outbounds'] as $k => $v) {
+                        if (isset($v['tag']) && $v['tag'] == $outbound) {
+                            $mainOutboundIndex = $k;
+                            break;
+                        }
+                    }
+                    if ($mainOutboundIndex !== null) {
+                        // Вставляем ноды перед основным outbound
+                        array_splice($c['outbounds'], $mainOutboundIndex, 0, $nodes);
+                    } else {
+                        // Если не нашли основной outbound, добавляем ноды в начало
+                        $c['outbounds'] = array_merge($nodes, $c['outbounds']);
+                    }
+                }
                 $c['route'] = $this->addRuleSet($c['route']);
                 $c['route'] = $this->createRuleSet($c['route'], $uid, $domain);
                 if (!empty($c['route']['rules'])) {
